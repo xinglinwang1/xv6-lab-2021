@@ -80,3 +80,22 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
+
+// Return the amount of free memory.
+//由于 xv6 管理内存空闲空间使用的是空闲链表，参照链表的结构后，只需遍历链表并计算数量，然后乘以页
+//面大小即可
+int getfreemem(void)
+{
+int count = 0;
+struct run *r;
+acquire(&kmem.lock);
+r = kmem.freelist;
+while (r)
+{
+count++;
+r = r->next;
+}
+release(&kmem.lock);
+return count * PGSIZE;
+}
