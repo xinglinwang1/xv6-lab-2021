@@ -119,7 +119,18 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  
+  /********************************************************************************/
+  // 修改（2/3）
+  // 分配一个usycall页面
+  /********************************************************************************/
+  if((p->usyscall = (struct usyscall *)kalloc()) == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
 
+  p->usyscall->pid = p->pid;
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
@@ -153,6 +164,12 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  /*********************************************************************************/
+  //在完成页面的初始化后，进程应当得以正常运行，但需要记得在进程结束后释放分配的页面
+  /*********************************************************************************/
+  if(p->usyscall)
+    kfree((void*)p->usyscall);
+  p->usyscall = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -172,11 +189,22 @@ pagetable_t
 proc_pagetable(struct proc *p)
 {
   pagetable_t pagetable;
-
+  
+  /*********************************************************************************/
+  // 修改（1/3）
+  //初始化一个新页表
   // An empty page table.
+  /*********************************************************************************/
   pagetable = uvmcreate();
   if(pagetable == 0)
     return 0;
+  
+  //map a user read only page at USYSCALL, for optimization for the getpid()
+  if(mappages(pagetable, USYSCALL, PGSIZE,
+              (uint64)(p->usyscall), PTE_R | PTE_U) < 0){
+    uvmfree(pagetable, 0);
+    return 0;
+  }
 
   // map the trampoline code (for system call return)
   // at the highest user virtual address.
@@ -206,6 +234,10 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  /********************************************************************************/
+  // 修改（3/3）
+  /********************************************************************************/
+  uvmunmap(pagetable, USYSCALL, 1, 0);
   uvmfree(pagetable, sz);
 }
 
