@@ -92,29 +92,72 @@ e1000_init(uint32 *xregs)
   regs[E1000_IMS] = (1 << 7); // RXDW -- Receiver Descriptor Write Back
 }
 
-int
-e1000_transmit(struct mbuf *m)
-{
-  //
-  // Your code here.
-  //
-  // the mbuf contains an ethernet frame; program it into
-  // the TX descriptor ring so that the e1000 sends it. Stash
-  // a pointer so that it can be freed after sending.
-  //
-  
+int e1000_transmit(struct mbuf *m){
+  acquire(&e1000_lock);
+  uint32 idx = regs[E1000_TDT]; 
+  // ask the E1000 for the TX ring index 
+  // at which it's expecting the next packet, 
+  // by reading the E1000_TDT control register.
+  if (tx_ring[idx].status != E1000_TXD_STAT_DD){
+    // 检查tx_ring是否溢出
+    // 如果E1000_TDT索引的描述符中没有设置E1000_TXD_STAT_DD，则E1000没有完成相应的先前传输请求，返回错误。
+    printf("e1000_transmit: tx queue full\n");
+    __sync_synchronize();
+    release(&e1000_lock);
+    return -1;
+  } 
+  else {
+    // 否则，调用mbuffree释放最后一个mbuf
+    // that was transmitted from that descriptor (if there was one).
+    if (tx_mbufs[idx] != 0){
+      mbuffree(tx_mbufs[idx]);
+    }
+      
+    // m->head 指向内存中packet的内容
+    tx_ring[idx].addr = (uint64) m->head;
+    // m->len是packet的长度
+    tx_ring[idx].length = (uint16) m->len;
+    tx_ring[idx].cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+    tx_mbufs[idx] = m;
+    tx_ring[idx].cso = 0;
+    tx_ring[idx].css = 0;
+   
+    regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
+  }
+  __sync_synchronize();
+  release(&e1000_lock);
+
   return 0;
 }
 
-static void
-e1000_recv(void)
-{
-  //
-  // Your code here.
-  //
-  // Check for packets that have arrived from the e1000
-  // Create and deliver an mbuf for each packet (using net_rx()).
-  //
+extern void net_rx(struct mbuf *);
+static void e1000_recv(void){
+  uint32 idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  struct rx_desc* dest = &rx_ring[idx];
+  // 通过检查描述符状态部分中的E1000_RXD_STAT_DD位来检查新数据包是否可用
+  while (rx_ring[idx].status & E1000_RXD_STAT_DD){
+    acquire(&e1000_lock);
+
+    struct mbuf *buf = rx_mbufs[idx];
+    mbufput(buf, dest->length);
+
+    if (!(rx_mbufs[idx] = mbufalloc(0))){
+      panic("mbuf alloc failed");
+    }
+    
+    dest->status = 0;
+    regs[E1000_RDT] = idx;
+    dest->addr = (uint64)rx_mbufs[idx]->head;
+   
+    __sync_synchronize();
+   
+    release(&e1000_lock);
+
+    net_rx(buf);
+    idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+    dest = &rx_ring[idx];
+  }
+  
 }
 
 void
