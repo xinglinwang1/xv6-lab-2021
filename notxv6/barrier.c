@@ -25,12 +25,22 @@ barrier_init(void)
 static void 
 barrier()
 {
-  // YOUR CODE HERE
-  //
-  // Block until all threads have called barrier() and
-  // then increment bstate.round.
-  //
-  
+  /*为实现线程屏障，需要维护一个互斥锁、一个条件变量、用以记录到达线程屏障的线程数
+    的整数和记录线程屏障轮数的整数。*/
+  /*此后在某个线程到达 barrier() 时，需要获取互斥锁进而修改 nthread。
+    当 nthread 与预定的值相等时，将 nthread 清零，轮数加一，并唤醒所有等待中的线程*/
+  pthread_mutex_lock(&bstate.barrier_mutex);
+  bstate.nthread ++;
+  if (bstate.nthread == nthread)
+  {
+    bstate.round++;
+    bstate.nthread = 0;
+    pthread_cond_broadcast(&bstate.barrier_cond);
+  } else {
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  }
+  /*释放互斥锁*/
+  pthread_mutex_unlock(&bstate.barrier_mutex);
 }
 
 static void *

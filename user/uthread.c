@@ -1,5 +1,6 @@
 #include "kernel/types.h"
 #include "kernel/stat.h"
+// #include "kernel/spinlock.h"
 #include "user/user.h"
 
 /* Possible states of a thread: */
@@ -10,10 +11,33 @@
 #define STACK_SIZE  8192
 #define MAX_THREAD  4
 
+// 保存每个线程的上下文
+struct context {
+  uint64 ra;
+  uint64 sp;
+
+  // callee-saved寄存器
+  uint64 s0;
+  uint64 s1;
+  uint64 s2;
+  uint64 s3;
+  uint64 s4;
+  uint64 s5;
+  uint64 s6;
+  uint64 s7;
+  uint64 s8;
+  uint64 s9;
+  uint64 s10;
+  uint64 s11;
+};
 
 struct thread {
+  //字节数组用作线程的栈
   char       stack[STACK_SIZE]; /* the thread's stack */
+  //整数数组用于表示线程的状态
   int        state;             /* FREE, RUNNING, RUNNABLE */
+  //增加一个数据结构用于保存每个线程的上下文
+  struct context context;       // uthread_switch() here to switch the thread
 };
 struct thread all_thread[MAX_THREAD];
 struct thread *current_thread;
@@ -31,6 +55,9 @@ thread_init(void)
   current_thread->state = RUNNING;
 }
 
+
+/*在调度线程时，选中下一个可运行的线程后，使用 thread_switch 切换上
+下文即可*/
 void 
 thread_schedule(void)
 {
@@ -58,14 +85,24 @@ thread_schedule(void)
     next_thread->state = RUNNING;
     t = current_thread;
     current_thread = next_thread;
+    // printf("ra: %p\n",t->context.ra);
+    // printf("sp: %p\n",t->context.sp);    
+    // printf("ra after: %p\n",current_thread->context.ra);
+    // printf("sp after: %p\n",current_thread->context.sp);
     /* YOUR CODE HERE
      * Invoke thread_switch to switch from t to next_thread:
      * thread_switch(??, ??);
      */
+    // t->state = RUNNABLE; 这里不用把线程状态改成RUNNABLE，否则就会让0线程也能跑，导致出错；yield()已经改过了
+    thread_switch((uint64)&t->context, (uint64)&current_thread->context);
+
   } else
     next_thread = 0;
 }
 
+/*上面的 thread_switch 在保存第一个进程的上下文后会加载第二个进程的上下文，
+然后跳至刚刚加载的 ra 地址处开始执行，故而我们在创建进程时只需将 ra 设为我们所要执行
+的线程的函数地址即可。*/
 void 
 thread_create(void (*func)())
 {
@@ -76,6 +113,8 @@ thread_create(void (*func)())
   }
   t->state = RUNNABLE;
   // YOUR CODE HERE
+  t->context.ra = (uint64)func;
+  t->context.sp = (uint64)&t->stack[STACK_SIZE];
 }
 
 void 

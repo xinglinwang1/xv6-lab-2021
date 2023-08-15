@@ -17,6 +17,8 @@ struct entry *table[NBUCKET];
 int keys[NKEYS];
 int nthread = 1;
 
+//首先定义一个保护哈希表的互斥锁
+pthread_mutex_t lock;
 
 double
 now()
@@ -36,9 +38,11 @@ insert(int key, int value, struct entry **p, struct entry *n)
   *p = e;
 }
 
+//在写入操作哈希表时加上获取锁的操作，并在写入完成后释放锁
 static 
 void put(int key, int value)
 {
+  
   int i = key % NBUCKET;
 
   // is the key already present?
@@ -52,9 +56,11 @@ void put(int key, int value)
     e->value = value;
   } else {
     // the new is new.
+    pthread_mutex_lock(&lock);
     insert(key, value, &table[i], table[i]);
+    pthread_mutex_unlock(&lock);
   }
-
+  
 }
 
 static struct entry*
@@ -104,7 +110,9 @@ main(int argc, char *argv[])
   pthread_t *tha;
   void *value;
   double t1, t0;
-
+  
+  //在开始线程前对锁进行初始化
+  pthread_mutex_init(&lock, NULL);
 
   if (argc < 2) {
     fprintf(stderr, "Usage: %s nthreads\n", argv[0]);
