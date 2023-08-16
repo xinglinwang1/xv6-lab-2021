@@ -95,3 +95,12 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+void *sys_mmap(void)
+{
+  return (void *)-1;
+}
+int sys_munmap(void)
+{
+  return -1;
+}

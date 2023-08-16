@@ -165,25 +165,25 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
-  uint64 a;
-  pte_t *pte;
-
-  if((va % PGSIZE) != 0)
-    panic("uvmunmap: not aligned");
-
-  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
-    if(PTE_FLAGS(*pte) == PTE_V)
-      panic("uvmunmap: not a leaf");
-    if(do_free){
-      uint64 pa = PTE2PA(*pte);
-      kfree((void*)pa);
-    }
-    *pte = 0;
-  }
+uint64 a;
+pte_t *pte;
+if((va % PGSIZE) != 0)
+panic("uvmunmap: not aligned");
+for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+if((pte = walk(pagetable, a, 0)) == 0)
+// panic("uvmunmap: walk");
+continue;
+if((*pte & PTE_V) == 0)
+// panic("uvmunmap: not mapped");
+continue;
+if(PTE_FLAGS(*pte) == PTE_V)
+panic("uvmunmap: not a leaf");
+if(do_free){
+uint64 pa = PTE2PA(*pte);
+kfree((void*)pa);
+}
+*pte = 0;
+}
 }
 
 // create an empty user page table.
@@ -266,19 +266,20 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 void
 freewalk(pagetable_t pagetable)
 {
-  // there are 2^9 = 512 PTEs in a page table.
-  for(int i = 0; i < 512; i++){
-    pte_t pte = pagetable[i];
-    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
-      // this PTE points to a lower-level page table.
-      uint64 child = PTE2PA(pte);
-      freewalk((pagetable_t)child);
-      pagetable[i] = 0;
-    } else if(pte & PTE_V){
-      panic("freewalk: leaf");
-    }
-  }
-  kfree((void*)pagetable);
+// there are 2^9 = 512 PTEs in a page table.
+for(int i = 0; i < 512; i++){
+pte_t pte = pagetable[i];
+if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+// this PTE points to a lower-level page table.
+uint64 child = PTE2PA(pte);
+freewalk((pagetable_t)child);
+pagetable[i] = 0;
+} else if(pte & PTE_V){
+// panic("freewalk: leaf");
+continue;
+}
+}
+kfree((void*)pagetable);
 }
 
 // Free user memory pages,

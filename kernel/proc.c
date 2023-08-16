@@ -312,8 +312,37 @@ fork(void)
   release(&wait_lock);
 
   acquire(&np->lock);
-  np->state = RUNNABLE;
-  release(&np->lock);
+np->state = RUNNABLE;
+np->vma = 0;
+struct vma *pvma = p->vma;
+struct vma *pre = 0;
+while (pvma)
+{
+struct vma *nvma = vma_alloc();
+
+nvma->start = pvma->start;
+nvma->end = pvma->end;
+nvma->off = pvma->off;
+nvma->length = pvma->length;
+nvma->perm = pvma->perm;
+nvma->flags = pvma->flags;
+nvma->file = pvma->file;
+filedup(nvma->file);
+nvma->next = 0;
+if (pre == 0)
+{
+np->vma = nvma;
+}
+else
+{
+pre->next = nvma;
+}
+pre = nvma;
+release(&nvma->lock);
+pvma = pvma->next;
+}
+release(&np->lock);
+
 
   return pid;
 }
@@ -333,16 +362,61 @@ reparent(struct proc *p)
   }
 }
 
+
+
+
+
+void write_back(struct vma *v, uint64 addr, int n)
+{
+// no need to writeback
+if (!(v->perm & PTE_W) || (v->flags & MAP_PRIVATE))
+return;
+if ((addr % PGSIZE) != 0)
+panic("unmap: not aligned");
+struct file *f = v->file;
+int max = ((MAXOPBLOCKS - 1 - 1 - 2) / 2) * BSIZE;
+int i = 0;
+while (i < n)
+{
+int k = n - i;
+if (k > max)
+k = max;
+begin_op();
+ilock(f->ip);
+int wcnt = writei(f->ip, 1, addr + i, v->off + v->start - addr + i, k);
+iunlock(f->ip);
+end_op();
+i += wcnt;
+}
+}
+
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
+extern void write_back(struct vma *v, uint64 addr, int n);
 void
 exit(int status)
 {
-  struct proc *p = myproc();
+  
+struct proc *p = myproc();
+if (p == initproc)
+panic("init exiting");
+// mUnmap all vma
+struct vma *v = p->vma;
+struct vma *pvma;
+while (v)
+{
+write_back(v, v->start, v->length);
+uvmunmap(p->pagetable, v->start, PGROUNDUP(v->length) / PGSIZE, 1);
+fileclose(v->file);
+pvma = v->next;
+acquire(&v->lock);
+v->next = 0;
+v->length = 0;
+release(&v->lock);
+v = pvma;
+}
 
-  if(p == initproc)
-    panic("init exiting");
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
@@ -653,4 +727,22 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+// VMA list
+struct vma vma_list[NVMA];
+struct vma* vma_alloc()
+{
+for(int i = 0; i < NVMA; i++)
+{
+acquire(&vma_list[i].lock);
+if (vma_list[i].length == 0)
+{
+return &vma_list[i];
+} else
+{
+release(&vma_list[i].lock);
+}
+}
+panic("no free vma");
 }

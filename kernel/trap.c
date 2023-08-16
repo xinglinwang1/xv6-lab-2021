@@ -3,8 +3,11 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
+#include "sleeplock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fs.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -28,6 +31,53 @@ trapinithart(void)
 {
   w_stvec((uint64)kernelvec);
 }
+
+
+
+
+
+
+
+
+
+int mmap_alloc(uint64 va, int scause)
+{
+struct proc *p = myproc();
+struct vma* v = p->vma;
+while(v != 0)
+{
+if (va >= v->start && va < v->end)
+{
+break;
+}
+v = v->next;
+}
+if (v == 0)
+return -1;
+if (scause == 13 && !(v->perm & PTE_R))
+return -1;
+if (scause == 15 && !(v->perm & PTE_W))
+return -1;
+// load from file
+va = PGROUNDDOWN(va);
+char* mmem = kalloc();
+if (mmem == 0)
+return -1;
+memset(mmem, 0, PGSIZE);
+if (mappages(p->pagetable, va, PGSIZE, (uint64)mmem, v->perm) != 0)
+{
+kfree(mmem);
+return -1;
+}
+struct file *f = v->file;
+ilock(f->ip);
+readi(f->ip, 0, (uint64)mmem, v->off + va - v->start, PGSIZE);
+iunlock(f->ip);
+return 0;
+}
+
+
+
 
 //
 // handle an interrupt, exception, or system call from user space.
@@ -65,9 +115,13 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
-    // ok
-  } else {
+  } else if((r_scause() == 13) || (r_scause() == 15)){ // page fault
+  if (mmap_alloc(r_stval(), r_scause()) != 0)
+{
+printf("mmap: page fault\n");
+p->killed = 1;
+}
+} else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
