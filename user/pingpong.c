@@ -6,7 +6,7 @@ char buf[512];
 
 int main(int argc, char *argv[])
 {
-    //创建双向管道
+    //创建双向管道，用于父子进程间通信
     int p1[2], p2[2];
     pipe(p1);
     pipe(p2);
